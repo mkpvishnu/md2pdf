@@ -3,13 +3,13 @@ import { FileDown, AlignCenter, Settings, Eye, Edit3, Type, Palette, Layout, Che
 import html2pdf from 'html2pdf.js';
 
 // Default sample markdown (the resume)
-const defaultMarkdown = `# Your Name
+const defaultMarkdown = `# ->Your Name<-
 
-**Your Title / Role**
+->**Your Title / Role**<-
 
-Location | Phone | Email | LinkedIn
+->Location | Phone | Email | LinkedIn<-
 
-*Skills | Technologies | Areas of Expertise*
+->*Skills | Technologies | Areas of Expertise*<-
 
 ---
 
@@ -20,25 +20,49 @@ Location | Phone | Email | LinkedIn
 
 - Describe your key responsibilities and achievements
 - Use bullet points for easy reading
-- Highlight metrics and impact where possible
+- {#0d9488}Highlight metrics and impact where possible
 
 ---
 
-## Key Projects
+## {#2563eb}Key Projects
 
-### Project Name *(Company, Year)*
+### ->Project Name<- *(Company, Year)*
 Brief description of the project, technologies used, and impact delivered.
 
 ---
 
 ## Education & Certifications
 
-### Degree Name
+### ->{#9333ea}Degree Name<-
 *Institution Name* - Graduation Year
 
 ### Certifications
 - Certification Name (Issuing Organization, Year)
 `;
+
+// Inline formatting parser for centering and colors
+// Syntax: ->text<- for centering, {#hex}text or {colorname}text for coloring
+const parseInlineFormatting = (text) => {
+  let result = text;
+
+  // Parse centering with optional color: ->{#color}text<- or ->text<-
+  result = result.replace(
+    /-&gt;(\{#?[a-zA-Z0-9]+\})?(.*?)&lt;-/g,
+    (match, colorGroup, content) => {
+      const color = colorGroup ? colorGroup.slice(1, -1) : null;
+      const style = color ? ` style="color: ${color}"` : '';
+      return `<span class="md-center"${style}>${content}</span>`;
+    }
+  );
+
+  // Parse standalone color: {#hex}text or {colorname}text (until end of element or next format)
+  result = result.replace(
+    /\{(#[a-fA-F0-9]{3,6}|[a-zA-Z]+)\}([^<\n]+)/g,
+    (match, color, content) => `<span style="color: ${color}">${content}</span>`
+  );
+
+  return result;
+};
 
 // Markdown parser (simple but effective)
 const parseMarkdown = (md) => {
@@ -49,10 +73,10 @@ const parseMarkdown = (md) => {
     .replace(/>/g, '&gt;')
     // Horizontal rules
     .replace(/^---$/gm, '<hr class="md-hr"/>')
-    // Headers
-    .replace(/^### (.+)$/gm, '<h3 class="md-h3">$1</h3>')
-    .replace(/^## (.+)$/gm, '<h2 class="md-h2">$1</h2>')
-    .replace(/^# (.+)$/gm, '<h1 class="md-h1">$1</h1>')
+    // Headers with inline formatting support
+    .replace(/^### (.+)$/gm, (match, content) => `<h3 class="md-h3">${parseInlineFormatting(content)}</h3>`)
+    .replace(/^## (.+)$/gm, (match, content) => `<h2 class="md-h2">${parseInlineFormatting(content)}</h2>`)
+    .replace(/^# (.+)$/gm, (match, content) => `<h1 class="md-h1">${parseInlineFormatting(content)}</h1>`)
     // Bold and italic
     .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
@@ -71,7 +95,7 @@ const parseMarkdown = (md) => {
           !block.startsWith('<ul') &&
           !block.startsWith('<hr') &&
           !block.startsWith('<li')) {
-        return `<p class="md-p">${block.replace(/\n/g, '<br/>')}</p>`;
+        return `<p class="md-p">${parseInlineFormatting(block.replace(/\n/g, '<br/>'))}</p>`;
       }
       return block;
     })
@@ -187,6 +211,10 @@ export default function App() {
       }
       em {
         font-style: italic;
+      }
+      .md-center {
+        display: block;
+        text-align: center;
       }
     `;
   }, [styles]);
@@ -508,6 +536,7 @@ export default function App() {
       {/* Status Bar */}
       <div className="bg-gray-800 border-t border-gray-700 px-4 py-1 text-xs text-gray-500 flex justify-between">
         <span>Characters: {markdown.length} | Lines: {markdown.split('\n').length}</span>
+        <span className="text-gray-600">Tip: {'->'}<em>text</em>{'<-'} to center, {'{#hex}'}text for color</span>
         <span>A4 • {styles.fontFamily} • {styles.fontSize.body}pt</span>
       </div>
     </div>
