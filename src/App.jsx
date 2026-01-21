@@ -136,7 +136,7 @@ export default function App() {
   const previewRef = useRef(null);
   const editorRef = useRef(null);
 
-  // Insert formatting at current line
+  // Insert formatting at current line (smart insertion after markdown markers)
   const insertLineFormat = (prefix) => {
     const textarea = editorRef.current;
     if (!textarea) return;
@@ -144,29 +144,44 @@ export default function App() {
     const start = textarea.selectionStart;
     const text = textarea.value;
 
-    // Find line start
-    let lineStart = text.lastIndexOf('\n', start - 1) + 1;
-
-    // Check if prefix already exists and toggle it off
+    // Find line boundaries
+    const lineStart = text.lastIndexOf('\n', start - 1) + 1;
     const lineEnd = text.indexOf('\n', start);
     const currentLine = text.slice(lineStart, lineEnd === -1 ? text.length : lineEnd);
+
+    // Detect markdown markers at line start
+    const markerMatch = currentLine.match(/^(#{1,3}\s+|- )/);
+    const markerLength = markerMatch ? markerMatch[1].length : 0;
+    const insertPos = lineStart + markerLength;
+
+    // Check for existing format prefixes after the marker
+    const afterMarker = currentLine.slice(markerLength);
+    const hasCenterPrefix = afterMarker.startsWith('>> ');
+    const colorPrefixMatch = afterMarker.match(/^\{#[a-fA-F0-9]{3,6}\}\s*/);
 
     let newText;
     let newCursorPos;
 
-    if (currentLine.startsWith(prefix)) {
-      // Remove prefix
-      newText = text.slice(0, lineStart) + currentLine.slice(prefix.length) + text.slice(lineEnd === -1 ? text.length : lineEnd);
-      newCursorPos = start - prefix.length;
-    } else {
-      // Add prefix
-      newText = text.slice(0, lineStart) + prefix + text.slice(lineStart);
+    // Handle toggle for center prefix
+    if (prefix === '>> ' && hasCenterPrefix) {
+      // Remove center prefix
+      newText = text.slice(0, insertPos) + afterMarker.slice(3) + text.slice(lineEnd === -1 ? text.length : lineEnd);
+      newCursorPos = Math.max(insertPos, start - 3);
+    }
+    // Handle toggle for color prefix (check if same color)
+    else if (prefix.startsWith('{#') && colorPrefixMatch && afterMarker.startsWith(prefix)) {
+      // Remove color prefix
+      newText = text.slice(0, insertPos) + afterMarker.slice(prefix.length) + text.slice(lineEnd === -1 ? text.length : lineEnd);
+      newCursorPos = Math.max(insertPos, start - prefix.length);
+    }
+    else {
+      // Add prefix after marker
+      newText = text.slice(0, insertPos) + prefix + text.slice(insertPos);
       newCursorPos = start + prefix.length;
     }
 
     setMarkdown(newText);
 
-    // Restore cursor position
     setTimeout(() => {
       textarea.focus();
       textarea.setSelectionRange(newCursorPos, newCursorPos);
@@ -264,6 +279,7 @@ export default function App() {
       }
       .md-line-format {
         display: block;
+        width: 100%;
       }
     `;
   }, [styles]);
