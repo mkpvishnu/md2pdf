@@ -3,13 +3,13 @@ import { FileDown, AlignCenter, Settings, Eye, Edit3, Type, Palette, Layout, Che
 import html2pdf from 'html2pdf.js';
 
 // Default sample markdown (the resume)
-const defaultMarkdown = `# ->Your Name<-
+const defaultMarkdown = `# Your Name
 
-->**Your Title / Role**<-
+**Your Title / Role**
 
-->Location | Phone | Email | LinkedIn<-
+Location | Phone | Email | LinkedIn
 
-->*Skills | Technologies | Areas of Expertise*<-
+*Skills | Technologies | Areas of Expertise*
 
 ---
 
@@ -20,48 +20,54 @@ const defaultMarkdown = `# ->Your Name<-
 
 - Describe your key responsibilities and achievements
 - Use bullet points for easy reading
-- {#0d9488}Highlight metrics and impact where possible
+- Highlight metrics and impact where possible
 
 ---
 
-## {#2563eb}Key Projects
+## Key Projects
 
-### ->Project Name<- *(Company, Year)*
+### Project Name *(Company, Year)*
 Brief description of the project, technologies used, and impact delivered.
 
 ---
 
 ## Education & Certifications
 
-### ->{#9333ea}Degree Name<-
+### Degree Name
 *Institution Name* - Graduation Year
 
 ### Certifications
 - Certification Name (Issuing Organization, Year)
 `;
 
-// Inline formatting parser for centering and colors
-// Syntax: ->text<- for centering, {#hex}text or {colorname}text for coloring
-const parseInlineFormatting = (text) => {
-  let result = text;
+// Line formatting parser
+// Syntax: >> at line start = center, {#hex} or {color} at start = color
+const parseLineFormatting = (line) => {
+  let centered = false;
+  let color = null;
+  let content = line;
 
-  // Parse centering with optional color: ->{#color}text<- or ->text<-
-  result = result.replace(
-    /-&gt;(\{#?[a-zA-Z0-9]+\})?(.*?)&lt;-/g,
-    (match, colorGroup, content) => {
-      const color = colorGroup ? colorGroup.slice(1, -1) : null;
-      const style = color ? ` style="color: ${color}"` : '';
-      return `<span class="md-center"${style}>${content}</span>`;
-    }
-  );
+  // Check for center prefix: >>
+  if (content.startsWith('&gt;&gt; ') || content.startsWith('&gt;&gt;')) {
+    centered = true;
+    content = content.replace(/^&gt;&gt;\s*/, '');
+  }
 
-  // Parse standalone color: {#hex}text or {colorname}text (until end of element or next format)
-  result = result.replace(
-    /\{(#[a-fA-F0-9]{3,6}|[a-zA-Z]+)\}([^<\n]+)/g,
-    (match, color, content) => `<span style="color: ${color}">${content}</span>`
-  );
+  // Check for color prefix: {#hex} or {colorname}
+  const colorMatch = content.match(/^\{(#[a-fA-F0-9]{3,6}|[a-zA-Z]+)\}\s*/);
+  if (colorMatch) {
+    color = colorMatch[1];
+    content = content.slice(colorMatch[0].length);
+  }
 
-  return result;
+  if (centered || color) {
+    const styles = [];
+    if (centered) styles.push('text-align: center');
+    if (color) styles.push(`color: ${color}`);
+    return `<span class="md-line-format" style="${styles.join('; ')}">${content}</span>`;
+  }
+
+  return line;
 };
 
 // Markdown parser (simple but effective)
@@ -73,18 +79,18 @@ const parseMarkdown = (md) => {
     .replace(/>/g, '&gt;')
     // Horizontal rules
     .replace(/^---$/gm, '<hr class="md-hr"/>')
-    // Headers with inline formatting support
-    .replace(/^### (.+)$/gm, (match, content) => `<h3 class="md-h3">${parseInlineFormatting(content)}</h3>`)
-    .replace(/^## (.+)$/gm, (match, content) => `<h2 class="md-h2">${parseInlineFormatting(content)}</h2>`)
-    .replace(/^# (.+)$/gm, (match, content) => `<h1 class="md-h1">${parseInlineFormatting(content)}</h1>`)
+    // Headers with line formatting support
+    .replace(/^### (.+)$/gm, (match, content) => `<h3 class="md-h3">${parseLineFormatting(content)}</h3>`)
+    .replace(/^## (.+)$/gm, (match, content) => `<h2 class="md-h2">${parseLineFormatting(content)}</h2>`)
+    .replace(/^# (.+)$/gm, (match, content) => `<h1 class="md-h1">${parseLineFormatting(content)}</h1>`)
     // Bold and italic
     .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     // Links
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="md-link">$1</a>')
-    // Bullet points
-    .replace(/^- (.+)$/gm, '<li class="md-li">$1</li>')
+    // Bullet points with line formatting
+    .replace(/^- (.+)$/gm, (match, content) => `<li class="md-li">${parseLineFormatting(content)}</li>`)
     // Wrap consecutive li elements in ul
     .replace(/(<li class="md-li">.*<\/li>\n?)+/g, '<ul class="md-ul">$&</ul>')
     // Paragraphs (lines that aren't already wrapped)
@@ -95,7 +101,9 @@ const parseMarkdown = (md) => {
           !block.startsWith('<ul') &&
           !block.startsWith('<hr') &&
           !block.startsWith('<li')) {
-        return `<p class="md-p">${parseInlineFormatting(block.replace(/\n/g, '<br/>'))}</p>`;
+        // Apply line formatting to each line in the paragraph
+        const formattedLines = block.split('\n').map(line => parseLineFormatting(line)).join('<br/>');
+        return `<p class="md-p">${formattedLines}</p>`;
       }
       return block;
     })
@@ -124,7 +132,49 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(true);
   const [activeTab, setActiveTab] = useState('both'); // 'edit', 'preview', 'both'
   const [isExporting, setIsExporting] = useState(false);
+  const [formatColor, setFormatColor] = useState('#0d9488');
   const previewRef = useRef(null);
+  const editorRef = useRef(null);
+
+  // Insert formatting at current line
+  const insertLineFormat = (prefix) => {
+    const textarea = editorRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const text = textarea.value;
+
+    // Find line start
+    let lineStart = text.lastIndexOf('\n', start - 1) + 1;
+
+    // Check if prefix already exists and toggle it off
+    const lineEnd = text.indexOf('\n', start);
+    const currentLine = text.slice(lineStart, lineEnd === -1 ? text.length : lineEnd);
+
+    let newText;
+    let newCursorPos;
+
+    if (currentLine.startsWith(prefix)) {
+      // Remove prefix
+      newText = text.slice(0, lineStart) + currentLine.slice(prefix.length) + text.slice(lineEnd === -1 ? text.length : lineEnd);
+      newCursorPos = start - prefix.length;
+    } else {
+      // Add prefix
+      newText = text.slice(0, lineStart) + prefix + text.slice(lineStart);
+      newCursorPos = start + prefix.length;
+    }
+
+    setMarkdown(newText);
+
+    // Restore cursor position
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(newCursorPos, newCursorPos);
+    }, 0);
+  };
+
+  const applyCenter = () => insertLineFormat('>> ');
+  const applyColor = () => insertLineFormat(`{${formatColor}} `);
 
   // Generate CSS based on style config
   const generatePreviewCSS = useCallback(() => {
@@ -212,9 +262,8 @@ export default function App() {
       em {
         font-style: italic;
       }
-      .md-center {
+      .md-line-format {
         display: block;
-        text-align: center;
       }
     `;
   }, [styles]);
@@ -500,10 +549,40 @@ export default function App() {
         {/* Editor Panel */}
         {(activeTab === 'edit' || activeTab === 'both') && (
           <div className={`${activeTab === 'both' ? 'w-1/2' : 'w-full'} flex flex-col border-r border-gray-700`}>
-            <div className="bg-gray-800 px-4 py-2 text-sm font-medium text-gray-400 border-b border-gray-700 flex items-center gap-2">
-              <Edit3 size={14} /> Markdown Editor
+            <div className="bg-gray-800 px-4 py-2 text-sm font-medium text-gray-400 border-b border-gray-700 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Edit3 size={14} /> Markdown Editor
+              </div>
+              {/* Format Toolbar */}
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-gray-500 mr-2">Line:</span>
+                <button
+                  onClick={applyCenter}
+                  className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs flex items-center gap-1 transition"
+                  title="Center current line (>>)"
+                >
+                  <AlignCenter size={12} /> Center
+                </button>
+                <div className="flex items-center gap-1 bg-gray-700 rounded px-1">
+                  <input
+                    type="color"
+                    value={formatColor}
+                    onChange={(e) => setFormatColor(e.target.value)}
+                    className="w-5 h-5 rounded cursor-pointer border-0"
+                    title="Pick color"
+                  />
+                  <button
+                    onClick={applyColor}
+                    className="px-2 py-1 hover:bg-gray-600 rounded text-xs transition"
+                    title="Apply color to current line ({#hex})"
+                  >
+                    Color
+                  </button>
+                </div>
+              </div>
             </div>
             <textarea
+              ref={editorRef}
               value={markdown}
               onChange={(e) => setMarkdown(e.target.value)}
               className="flex-1 w-full p-4 bg-gray-900 text-gray-100 font-mono text-sm resize-none focus:outline-none"
@@ -536,7 +615,7 @@ export default function App() {
       {/* Status Bar */}
       <div className="bg-gray-800 border-t border-gray-700 px-4 py-1 text-xs text-gray-500 flex justify-between">
         <span>Characters: {markdown.length} | Lines: {markdown.split('\n').length}</span>
-        <span className="text-gray-600">Tip: {'->'}<em>text</em>{'<-'} to center, {'{#hex}'}text for color</span>
+        <span className="text-gray-600">Syntax: {'>> '}center | {'{#hex} '}color</span>
         <span>A4 • {styles.fontFamily} • {styles.fontSize.body}pt</span>
       </div>
     </div>
